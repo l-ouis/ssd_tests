@@ -222,6 +222,22 @@ def get_joint_strategy_from_marginals(probabilities):
     probas.append(np.array(probabilities[i]).reshape(probas_shapes))
   return np.prod(probas)
 
+def arank_mg(meta_game, return_joint=False, **unused_kwargs):
+  """alpharank dist for PSD_PSRO, assumes symmetric game
+  """
+  meta_games = [meta_game]
+  meta_games = [np.asarray(x) for x in meta_games]
+
+ 
+  joint_distr = alpharank.sweep_pi_vs_epsilon(meta_games)
+  joint_distr = remove_epsilon_negative_probs(joint_distr)
+
+  if return_joint:
+    marginals = get_alpharank_marginals(meta_games, joint_distr)
+    return marginals, joint_distr
+  else:
+    return joint_distr
+
 def alpharank_strategy(solver, return_joint=False, **unused_kwargs):
   """Returns AlphaRank distribution on meta game matrix.
 

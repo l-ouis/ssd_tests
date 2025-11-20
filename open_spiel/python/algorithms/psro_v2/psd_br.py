@@ -15,6 +15,8 @@ from open_spiel.python.algorithms import exploitability
 from open_spiel.python.algorithms import policy_aggregator
 from open_spiel.python.algorithms import lp_solver
 
+from open_spiel.python.algorithms.psro_v2.utils import arank_mg
+
 from psd_utils.DQN_agent import DQNAgent
 
 np.set_printoptions(precision=4)
@@ -161,6 +163,10 @@ class PSD_PSRO_SOLVER(object):
         DEBUG_ = False
         if DEBUG_:
             self.oracle_iters = 1000
+    
+    def mss_arank(self, meta_game):
+        dist = arank_mg(meta_game)
+        return dist, None
 
     def fictitious_play(self, meta_game, init_strategy=None, max_iters=5000):
         exp = 1
@@ -278,7 +284,7 @@ class PSD_PSRO_SOLVER(object):
         self.policy_set.append(policy)
 
     def update_ne_exp(self, it):
-        self.ne, sub_exp = self.fictitious_play(self.meta_game)
+        self.ne, sub_exp = self.mss_arank(self.meta_game)
         self.hist_ne.append(copy.deepcopy(self.ne))
 
         if it > 0 and (it % self.save_every == 0):

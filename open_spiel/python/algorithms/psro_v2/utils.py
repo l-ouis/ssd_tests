@@ -22,6 +22,7 @@ from open_spiel.python.algorithms import policy_aggregator
 from open_spiel.python.algorithms import policy_aggregator_joint
 from open_spiel.python.egt import alpharank
 from open_spiel.python.egt import utils as alpharank_utils
+from open_spiel.python.egt import ssd
 
 
 def empty_list_generator(number_dimensions):
@@ -221,7 +222,6 @@ def get_joint_strategy_from_marginals(probabilities):
     probas.append(np.array(probabilities[i]).reshape(probas_shapes))
   return np.prod(probas)
 
-
 def alpharank_strategy(solver, return_joint=False, **unused_kwargs):
   """Returns AlphaRank distribution on meta game matrix.
 
@@ -266,6 +266,61 @@ def alpharank_strategy(solver, return_joint=False, **unused_kwargs):
     else:
       return joint_distr
 
+def ssd_strategy(solver, return_joint=False, **unused_kwargs):
+  """Returns SSD distribution on meta game matrix.
+
+  Args:
+    solver: GenPSROSolver instance.
+    return_joint: a boolean specifying whether to return player-wise
+      marginals.
+
+  Returns:
+    marginals: a list, specifying for each player the alpharank marginal
+      distributions on their strategies.
+    joint_distr: a list, specifying the joint alpharank distributions for all
+      strategy profiles.
+  """
+  meta_games = solver.get_meta_game()
+  meta_games = [np.asarray(x) for x in meta_games]
+
+  if solver.symmetric_game:
+    meta_games = [meta_games[0]]
+
+    # alpharank distribution via alpha-sweep
+    # joint_distr = alpharank.sweep_pi_vs_epsilon(
+    #     meta_games)
+    kwargs = solver.get_kwargs() if hasattr(solver, "get_kwargs") else {}
+    # Filter out None values and only pass supported kwargs to SSD.
+    ssd_kwargs = {}
+    if isinstance(kwargs, dict):
+      ssd_kwargs.update(kwargs)
+
+    joint_distr = ssd.compute_ssd(meta_games, **ssd_kwargs)
+    joint_distr = remove_epsilon_negative_probs(joint_distr)
+
+    marginals = 2 * [joint_distr]
+    joint_distr = get_joint_strategy_from_marginals(marginals)
+    if return_joint:
+      return marginals, joint_distr
+    else:
+      return joint_distr
+
+  else:
+    joint_distr = ssd.compute_ssd(meta_games)
+    joint_distr = remove_epsilon_negative_probs(joint_distr)
+
+    if return_joint:
+      marginals = get_alpharank_marginals(meta_games, joint_distr)
+      return marginals, joint_distr
+    else:
+      return joint_distr
+
+
+
+def udm_alpha_psro_strategy(solver,
+                            return_joint=False,
+                            **unused_kwargs):
+  pass
 
 def get_strategy_profile_ids(payoff_tables):
   num_strats_per_population = (

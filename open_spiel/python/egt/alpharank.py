@@ -25,6 +25,7 @@ All equations and variable names correspond to the following paper:
 
 import numpy as np
 import scipy.linalg as la
+import scipy.sparse as sps
 
 from open_spiel.python.egt import alpharank_visualizer
 from open_spiel.python.egt import utils
@@ -153,7 +154,12 @@ def _get_rho_sr(payoff_table,
       assert payoff_sum is not None
       u = alpha * m / (m - 1) * (payoff_rs - payoff_sum / 2)
 
-    if np.isclose(u, 0, atol=1e-14):
+    if (
+      np.isclose(u, 0, atol=1e-14) or
+      np.isclose((1 - np.exp(-m * u)), 0, atol=1e-5) or
+      (1 - np.exp(-m * u)) == float('inf') or
+      (1 - np.exp(-m * u)) == float('-inf')
+      ):
       # To avoid divide by 0, use first-order approximation when u is near 0
       result = 1 / m
     else:
@@ -231,7 +237,12 @@ def _get_rho_sr_multipop(payoff_table_k,
 
   if use_fast_compute:
     u = alpha * (f_r - f_s)
-    if np.isclose(u, 0, atol=1e-14):
+    if (
+      np.isclose(u, 0, atol=1e-14) or
+      np.isclose((1 - np.exp(-m * u)), 0, atol=1e-5) or
+      (1 - np.exp(-m * u)) == float('inf') or
+      (1 - np.exp(-m * u)) == float('-inf')
+      ):
       # To avoid divide by 0, use first-order approximation when u is near 0
       result = 1 / m
     else:
@@ -330,7 +341,6 @@ def _get_multipop_transition_matrix(payoff_tables,
   num_strats_per_population = utils.get_num_strats_per_population(
       payoff_tables, payoffs_are_hpt_format)
   num_profiles = utils.get_num_profiles(num_strats_per_population)
-
   eta = 1. / (np.sum(num_strats_per_population - 1))
 
   c = np.zeros((num_profiles, num_profiles))
@@ -380,7 +390,6 @@ def _get_multipop_transition_matrix(payoff_tables,
           id_col_profile] = eta * rhos[id_row_profile, id_col_profile]
     # Special case of self-transition
     c[id_row_profile, id_row_profile] = 1 - sum(c[id_row_profile, :])
-
   return c, rhos
 
 
@@ -593,7 +602,6 @@ def sweep_pi_vs_alpha(payoff_tables,
    pi: AlphaRank stationary distribution.
    alpha: The AlphaRank selection-intensity level resulting from sweep.
   """
-
   payoffs_are_hpt_format = utils.check_payoffs_are_hpt(payoff_tables)
   num_populations = len(payoff_tables)
   num_strats_per_population = utils.get_num_strats_per_population(
@@ -779,7 +787,6 @@ def compute(payoff_tables,
         use_inf_alpha=use_inf_alpha,
         inf_alpha_eps=inf_alpha_eps)
     num_profiles = utils.get_num_profiles(num_strats_per_population)
-
   pi = _get_stationary_distr(c)
 
   rho_m = 1. / m if not use_inf_alpha else 1  # Neutral fixation probability

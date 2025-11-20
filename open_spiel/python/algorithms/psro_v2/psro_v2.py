@@ -79,6 +79,7 @@ class PSROSolver(abstract_meta_trainer.AbstractMetaTrainer):
                n_noisy_copies=0,
                alpha_noise=0.0,
                beta_noise=0.0,
+               max_policies_per_player=None,
                **kwargs):
     """Initialize the PSRO solver.
 
@@ -148,14 +149,22 @@ class PSROSolver(abstract_meta_trainer.AbstractMetaTrainer):
     self._alpha_noise = alpha_noise
     self._beta_noise = beta_noise
 
+    self._policy_cap = max_policies_per_player
+
     self._policies = []  # A list of size `num_players` of lists containing the
     # strategies of each player.
     self._new_policies = []
 
     # Alpharank is a special case here, as it's not supported by the abstract
     # meta trainer api, so has to be passed as a function instead of a string.
-    if not meta_strategy_method or meta_strategy_method == "alpharank":
+    if meta_strategy_method == "alpharank":
       meta_strategy_method = utils.alpharank_strategy
+    if meta_strategy_method == "ssd":
+      meta_strategy_method = utils.ssd_strategy
+    if meta_strategy_method == "unified":
+      meta_strategy_method = utils.unified_strategy
+    if meta_strategy_method == "udm_alpha":
+      meta_strategy_method = utils.udm_alpha_psro_strategy
 
     print("Sampling from marginals : {}".format(sample_from_marginals))
     self.sample_from_marginals = sample_from_marginals
@@ -484,6 +493,24 @@ class PSROSolver(abstract_meta_trainer.AbstractMetaTrainer):
 
     self._meta_games = meta_games
     self._policies = updated_policies
+
+    if self._policy_cap is not None:
+      marginals = self.get_meta_strategies()
+
+      # top k of payoff
+      for k in range(self._num_players):
+        probs = np.array(marginals[k])
+        if probs.size > self._policy_cap:
+          topk = np.argsort(-probs)[:self._policy_cap]
+          topk_sorted = np.sort(topk)
+
+          self._policies[k] = [self._policies[k][i] for i in topk_sorted]
+
+          for p in range(self._num_players):
+            self._meta_games[p] = np.take(self._meta_games[p], topk_sorted, axis=k)
+
+      self.update_meta_strategies()
+
     return meta_games
 
   def get_meta_game(self):

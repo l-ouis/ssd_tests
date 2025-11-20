@@ -19,7 +19,7 @@ Multiagent Learning", ICLR 2020; https://arxiv.org/abs/1909.12823), run this
 script with:
   - `game_name` in ['kuhn_poker', 'leduc_poker']
   - `n_players` in [2, 3, 4, 5]
-  - `meta_strategy_method` in ['alpharank', 'uniform', 'nash', 'prd']
+  - `meta_strategy_method` in ['alpharank', 'ssd', 'udm_alpha']
   - `rectifier` in ['', 'rectified']
 
 The other parameters keeping their default values.
@@ -44,24 +44,56 @@ from open_spiel.python.algorithms.psro_v2 import psro_v2
 from open_spiel.python.algorithms.psro_v2 import rl_oracle
 from open_spiel.python.algorithms.psro_v2 import rl_policy
 from open_spiel.python.algorithms.psro_v2 import strategy_selectors
+import sys
+sys.setrecursionlimit(3000)
+
+
+def get_memory_usage_mb():
+  try:
+    import psutil
+
+    rss = psutil.Process().memory_info().rss
+    return rss / (1024.0 * 1024.0)
+  except Exception:
+    try:
+      import resource
+
+      rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+      return rss_kb / 1024.0
+    except Exception:
+      return -1.0
 
 
 FLAGS = flags.FLAGS
 
 # Game-related
-flags.DEFINE_string("game_name", "kuhn_poker", "Game name.")
-flags.DEFINE_integer("n_players", 2, "The number of players.")
+flags.DEFINE_string("game_name", "leduc_poker", "Game name.")
+flags.DEFINE_integer("n_players", 3, "The number of players.")
+flags.DEFINE_string("log_path", "psro_logs.txt", "output txt for logging")
+
+flags.DEFINE_bool("use_sparse", False, "whether to use scipy sparse matrices")
+flags.DEFINE_integer("max_policies", 6, "max # of policies to keep for any given player")
+flags.DEFINE_float("udm_tau", 1.0,
+           "Weight on the UDM diversity term when using the udm_alpha meta strategy.")
+flags.DEFINE_float(
+  "udm_baseline_weight", 1.0,
+  "Weight on the baseline payoff component when using the udm_alpha meta strategy.")
+flags.DEFINE_float("udm_temp", 1.0,
+           "Softmax temperature used by the udm_alpha meta strategy.")
+
 
 # PSRO related
-flags.DEFINE_string("meta_strategy_method", "alpharank",
-                    "Name of meta strategy computation method.")
+flags.DEFINE_string(
+  "meta_strategy_method", "udm_alpha",
+  "Name of meta strategy computation method (e.g., 'alpharank', 'uniform',"
+  " 'nash', 'prd', 'ssd', 'unified', 'udm_alpha').")
 flags.DEFINE_integer("number_policies_selected", 1,
                      "Number of new strategies trained at each PSRO iteration.")
-flags.DEFINE_integer("sims_per_entry", 1000,
+flags.DEFINE_integer("sims_per_entry", 100,
                      ("Number of simulations to run to estimate each element"
                       "of the game outcome matrix."))
 
-flags.DEFINE_integer("gpsro_iterations", 100,
+flags.DEFINE_integer("gpsro_iterations", 50,
                      "Number of training steps for GPSRO.")
 flags.DEFINE_bool("symmetric_game", False, "Whether to consider the current "
                   "game as a symmetric game.")
@@ -70,7 +102,7 @@ flags.DEFINE_bool("symmetric_game", False, "Whether to consider the current "
 flags.DEFINE_string("rectifier", "",
                     "Which rectifier to use. Choices are '' "
                     "(No filtering), 'rectified' for rectified.")
-flags.DEFINE_string("training_strategy_selector", "probabilistic",
+flags.DEFINE_string("training_strategy_selector", "top_k_probabilities",
                     "Which strategy selector to use. Choices are "
                     " - 'top_k_probabilities': select top "
                     "`number_policies_selected` strategies. "
@@ -254,21 +286,24 @@ def gpsro_looper(env, oracle, agents):
       prd_iterations=50000,
       prd_gamma=1e-10,
       sample_from_marginals=sample_from_marginals,
-      symmetric_game=FLAGS.symmetric_game)
+      symmetric_game=FLAGS.symmetric_game,
+      max_policies_per_player=FLAGS.max_policies,
+      use_sparse=FLAGS.use_sparse,
+      udm_tau=FLAGS.udm_tau,
+      udm_baseline_weight=FLAGS.udm_baseline_weight,
+      udm_temp=FLAGS.udm_temp)
 
   start_time = time.time()
   for gpsro_iteration in range(FLAGS.gpsro_iterations):
-    if FLAGS.verbose:
-      print("Iteration : {}".format(gpsro_iteration))
-      print("Time so far: {}".format(time.time() - start_time))
+    iter_start = time.time()
     g_psro_solver.iteration()
+    iter_end = time.time()
+    iter_time = iter_end - iter_start
+    memory_mb = get_memory_usage_mb()
+
     meta_game = g_psro_solver.get_meta_game()
     meta_probabilities = g_psro_solver.get_meta_strategies()
     policies = g_psro_solver.get_policies()
-
-    if FLAGS.verbose:
-      print("Meta game : {}".format(meta_game))
-      print("Probabilities : {}".format(meta_probabilities))
 
     # The following lines only work for sequential games for the moment.
     if env.game.get_type().dynamics == pyspiel.GameType.Dynamics.SEQUENTIAL:
@@ -281,7 +316,19 @@ def gpsro_looper(env, oracle, agents):
 
       _ = print_policy_analysis(policies, env.game, FLAGS.verbose)
       if FLAGS.verbose:
+        print("Iteration : {}".format(gpsro_iteration))
+        print("Iteration time (s): {:.6f}".format(iter_time))
+        if memory_mb >= 0:
+          print("mb used: {:.2f}".format(memory_mb))
+        else:
+          print("mb used: n/a")
         print("Exploitabilities : {}".format(exploitabilities))
+        try:
+          with open(FLAGS.log_path, "a") as f:
+            f.write(str(exploitabilities) + "," + str(iter_time) + "," + str(memory_mb) + "\n")
+        except Exception as e:
+          if FLAGS.verbose:
+            print("Failed to write exploitabilities to exp_ssd.txt: {}".format(e))
         print("Exploitabilities per player : {}".format(expl_per_player))
 
 
